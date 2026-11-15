@@ -64,9 +64,19 @@ const WELCOME_TEXT = '🔥 <b>Welcome to USDC ONE!</b>\n\n' +
     '👇 Join our official channels and then open the bot to get started!\n\n' +
     '🚀 Start earning with USDC ONE today!';
 
-mongoose.connect(MONGO_URI)
-    .then(() => console.log('✅ MongoDB connected'))
-    .catch(err => { console.error('❌ MongoDB error:', err.message); process.exit(1); });
+// ---------- DATABASE (server band nahi hota, DB connect na ho to retry karta hai) ----------
+async function connectDB() {
+    try {
+        await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 15000 });
+        console.log('✅ MongoDB connected');
+    } catch (err) {
+        console.error('❌ MongoDB error:', err.message, '- retrying in 10s');
+        setTimeout(connectDB, 10000);
+    }
+}
+connectDB();
+
+const dbReady = () => mongoose.connection.readyState === 1;
 
 const UserSchema = new mongoose.Schema({
     id: { type: String, required: true, unique: true },
@@ -283,6 +293,9 @@ function displayName(u) { return u.username ? `@${u.username}` : (u.first_name |
 
 async function auth(req, res, next) {
     try {
+        // Database abhi connect nahi hua to saaf message do (crash ya 404 nahi)
+        if (!dbReady()) return res.status(503).json({ ok: false, error: 'Server is starting, please try again in a minute' });
+
         // IP level rate limit
         if (!rl('ip:' + req.ip, 600, 60000)) return res.status(429).json({ ok: false, error: 'Too many requests. Please slow down.' });
 
@@ -388,8 +401,8 @@ app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: false, limit: '10kb' }));
 app.use((req, res, next) => { res.setHeader('X-Content-Type-Options', 'nosniff'); next(); });
 app.use(express.static(path.join(__dirname, 'public')));
-app.get('/health', (req, res) => res.send('OK'));
-app.get('/api/ping', (req, res) => res.json({ ok: true, version: 'usdc-one-v1' }));
+app.get('/health', (req, res) => res.send(dbReady() ? 'OK' : 'OK (database connecting)'));
+app.get('/api/ping', (req, res) => res.json({ ok: true, db: dbReady(), version: 'usdc-one-v1' }));
 
 // ---------- USER API ----------
 
@@ -916,6 +929,9 @@ app.post('/admin/broadcast', checkAdmin, wrap(async (req, res) => {
         await sleep(60);
     }
 }));
+
+// Unknown /api path: HTML ki jagah JSON 404
+app.use('/api', (req, res) => res.status(404).json({ ok: false, error: 'Not found' }));
 
 // ---------- START ----------
 
