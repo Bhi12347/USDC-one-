@@ -432,12 +432,6 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
             <span>Please install Trust Wallet first, then tap Connect again. Already installed? Just tap Connect again.</span>
             <button class="btn btn-green" onclick="installTrust()">Install Trust Wallet</button>
           </div>
-          <button class="wallet-dc" style="color:var(--cy)" onclick="showManual()">Can't connect? Enter BEP-20 address manually</button>
-          <div id="wallet-manual" style="display:none;margin-top:10px;">
-            <div class="wd-input" style="margin:0 0 8px"><i class="fa-solid fa-wallet"></i><input type="text" id="wallet-manual-input" placeholder="0x... (USDC BEP-20 address)" autocomplete="off" spellcheck="false"></div>
-            <div class="wallet-none" style="margin-bottom:8px">Double-check your address. Your first withdrawal address gets locked.</div>
-            <button class="btn btn-dark" onclick="saveManual()">Save Wallet</button>
-          </div>
         </div>
         <div id="wallet-on" style="display:none;">
           <span class="wallet-net"><i class="fa-solid fa-circle-check"></i> USDC • BEP-20 (BSC)</span>
@@ -499,7 +493,7 @@ const TAP_TARGET = 30;                       // ek line = 30 taps
 const ROUNDS_PER_DAY = 10;                   // din me 10 lines
 const ROUND_REWARD = 0.05;                   // ek line = 0.05 USDC  (10 x 0.05 = 0.5 / day)
 const TAP_REWARD = ROUND_REWARD / TAP_TARGET; // ~0.001667 USDC per tap
-const ROUND_COOLDOWN = 5 * 60 * 1000;        // line ke baad 5 minute
+const ROUND_COOLDOWN = 0;                    // line poori hone ke baad koi wait nahi
 const MAX_TPS = 14;                          // insani limit: max taps / second
 const FLUSH_EVERY = 10;
 
@@ -1316,13 +1310,15 @@ function resetConnectBtn() {
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-link"></i> Connect Trust Wallet'; }
 }
 
-function showManual() { const m = $id('wallet-manual'); if (m) m.style.display = 'block'; resetConnectBtn(); }
-function saveManual() {
-    const v = (($id('wallet-manual-input') || {}).value || '').trim();
-    if (!isAddr(v)) { showToast('Invalid BEP-20 address. It must start with 0x and be 42 characters.'); return; }
-    saveWallet(v);
-    hideNoWallet();
-    showToast('Wallet saved ✓');
+// WalletConnect server tak network pahunch raha hai ya nahi (VPN / ISP block pakadne ke liye)
+async function checkRelay() {
+    try {
+        const c = new AbortController();
+        const t = setTimeout(() => c.abort(), 6000);
+        await fetch('https://relay.walletconnect.org/', { mode: 'no-cors', cache: 'no-store', signal: c.signal });
+        clearTimeout(t);
+        return true;
+    } catch (e) { return false; }
 }
 
 function hideNoWallet() { const w = $id('wallet-warn'); if (w) w.style.display = 'none'; }
@@ -1448,13 +1444,15 @@ async function connectWallet() {
         btn.disabled = false;
         btn.innerHTML = '<i class="fa-solid fa-link"></i> Connect Trust Wallet';
         const m = String((e && e.message) || '');
-        if (m === 'TIMEOUT' || m === 'LOADTIMEOUT') { WC = null; wcConnP = null; wcUri = ''; }
-        if (m === 'TIMEOUT' || m === 'LOADTIMEOUT') showManual();
-        showToast(m === 'LOADTIMEOUT'
-            ? 'Wallet library did not load. Turn off VPN and try again, or enter address manually.'
-            : m === 'TIMEOUT'
-            ? 'Could not reach WalletConnect. Check Reown allowed domain, or enter address manually.'
-            : (m.length > 80 ? 'Wallet connection failed. Please try again.' : (m || 'Wallet connection cancelled')));
+        if (m === 'TIMEOUT' || m === 'LOADTIMEOUT') {
+            WC = null; wcConnP = null; wcUri = '';
+            const reachable = await checkRelay();
+            showToast(reachable
+                ? 'WalletConnect reachable but connection failed. Check Reown project domain settings.'
+                : 'Your network is blocking WalletConnect. Turn off VPN or switch WiFi / mobile data and try again.');
+        } else {
+            showToast(m.length > 80 ? 'Wallet connection failed. Please try again.' : (m || 'Wallet connection cancelled'));
+        }
     }
 }
 
