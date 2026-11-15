@@ -460,7 +460,7 @@ const BOT_USERNAME = 'UsdcOneTap_Bot';
 const COOLDOWN = 24 * 3600 * 1000;
 const DAILY_REWARD = 0.5;      // USDC per day
 const MIN_WITHDRAW = 2;        // USDC
-const WC_PROJECT_ID = 'YOUR_WALLETCONNECT_PROJECT_ID';   // https://cloud.walletconnect.com se free ID lo
+const WC_PROJECT_ID = 'cc4b991729bc41c031f9b086b5e0235c';   // Reown / WalletConnect Project ID
 const TRUST_WC_ID = '4622a2b2d6af1c9844944291e5e7351a6aa24cd7b23099efac1b2fd875da31a0';
 const initData = (tg && tg.initData) || '';
 // ===== SECURITY CONFIG =====
@@ -1248,6 +1248,7 @@ function renderHistory() {
    TRUST WALLET (USDC BEP-20 / BSC)
    - Telegram ke andar WalletConnect se Trust Wallet connect hota hai
    - Agar Trust Wallet ka in-app browser ho to seedha injected provider
+   - Sirf PUBLIC ADDRESS milta hai (eth_requestAccounts). Koi sign / transaction permission nahi.
    - Withdraw sirf isi connected address par hoga
    ===================================================== */
 const isAddr = a => /^0x[a-fA-F0-9]{40}$/.test(a || '');
@@ -1295,10 +1296,9 @@ async function getWC() {
     const EP = window['@walletconnect/ethereum-provider'].EthereumProvider;
     const p = await EP.init({
         projectId: WC_PROJECT_ID,
-        chains: [56],
-        optionalChains: [56],
-        showQrModal: false,          // apna deep link use karte hain (Telegram me QR kaam nahi karta)
-        methods: ['eth_requestAccounts', 'eth_chainId', 'personal_sign'],
+        chains: [56],                         // sirf BNB Smart Chain (BEP-20)
+        showQrModal: false,                   // apna deep link use karte hain (Telegram me QR kaam nahi karta)
+        methods: ['eth_requestAccounts'],     // sirf address, koi sign/transaction nahi
         events: ['accountsChanged', 'chainChanged'],
         metadata: { name: 'USDC ONE', description: 'USDC ONE Bot', url: location.origin, icons: [] }
     });
