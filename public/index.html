@@ -220,6 +220,9 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 .wallet-addr{margin-top:10px;font-size:12px;font-weight:600;color:#fff;word-break:break-all;line-height:1.5;user-select:text}
 .wallet-none{font-size:12px;color:var(--mu);font-weight:500;line-height:1.5}
 .wallet-dc{margin-top:10px;background:none;border:none;color:var(--bad);font-size:11px;font-weight:700;cursor:pointer;text-decoration:underline}
+.wallet-warn{margin-top:12px;padding:12px;border-radius:14px;background:rgba(255,92,122,.1);border:1px solid rgba(255,92,122,.5);text-align:left}
+.wallet-warn b{display:block;color:var(--bad);font-size:13px;font-weight:800}
+.wallet-warn span{display:block;font-size:11px;color:#fda4af;line-height:1.5;margin:6px 0 10px}
 
 .tab-content{display:none}
 .tab-content.active{display:block;animation:fade .35s}
@@ -424,6 +427,11 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
         <div id="wallet-off">
           <div class="wallet-none">No wallet connected. Connect your Trust Wallet to withdraw. Withdrawals go only to the connected wallet.</div>
           <button class="btn btn-dark" id="wallet-connect-btn" style="margin-top:12px;" onclick="connectWallet()"><i class="fa-solid fa-link"></i> Connect Trust Wallet</button>
+          <div class="wallet-warn" id="wallet-warn" style="display:none;">
+            <b><i class="fa-solid fa-triangle-exclamation"></i> You don't have Trust Wallet</b>
+            <span>Please install Trust Wallet first, then tap Connect again. Already installed? Just tap Connect again.</span>
+            <button class="btn btn-green" onclick="installTrust()">Install Trust Wallet</button>
+          </div>
         </div>
         <div id="wallet-on" style="display:none;">
           <span class="wallet-net"><i class="fa-solid fa-circle-check"></i> USDC • BEP-20 (BSC)</span>
@@ -1279,6 +1287,36 @@ function loadScript(src) {
 
 
 let wcPending = false;
+let wcUri = '';          // current WalletConnect pairing link
+let wcConnP = null;      // pending connect() promise
+
+// Link ko phone ke external browser me kholo (taake Trust Wallet app khule)
+function openExternal(url) {
+    try { if (tg && tg.openLink) { tg.openLink(url, { try_browser: 'chrome' }); return; } } catch (e) {}
+    try { if (tg && tg.openLink) { tg.openLink(url); return; } } catch (e) {}
+    window.open(url, '_blank');
+}
+
+function installTrust() {
+    const ios = tg && (tg.platform === 'ios');
+    openExternal(ios
+        ? 'https://apps.apple.com/app/trust-crypto-bitcoin-wallet/id1288339409'
+        : 'https://play.google.com/store/apps/details?id=com.wallet.crypto.trustapp');
+}
+
+function resetConnectBtn() {
+    wcPending = false;
+    const btn = $id('wallet-connect-btn');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-link"></i> Connect Trust Wallet'; }
+}
+
+function hideNoWallet() { const w = $id('wallet-warn'); if (w) w.style.display = 'none'; }
+
+function showNoWallet() {
+    resetConnectBtn();
+    const w = $id('wallet-warn'); if (w) w.style.display = 'block';
+    showToast("You don't have Trust Wallet. Please install Trust Wallet first.");
+}
 
 function trustLink(uri) { return 'https://link.trustwallet.com/wc?uri=' + encodeURIComponent(uri); }
 
@@ -1327,6 +1365,7 @@ function walletConnected(a) {
     wcPending = false;
     const btn = $id('wallet-connect-btn');
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-link"></i> Connect Trust Wallet'; }
+    hideNoWallet();
     showToast('Trust Wallet connected! ✓');
 }
 
@@ -1356,32 +1395,56 @@ async function connectWallet() {
         }
 
         // 2) Telegram se: WalletConnect + Trust Wallet deep link
+        hideNoWallet();
         const p = await getWC();
         let a = walletFromProvider(p);
         if (!a) {
-            p.once('display_uri', uri => {
-                btn.innerText = 'Approve in Trust Wallet...';
-                openLink(trustLink(uri));          // Trust Wallet app khulta hai
-            });
-            await p.connect();                     // user Trust me approve karke wapas aata hai
-            a = walletFromProvider(p);
+            if (!wcConnP) {
+                wcUri = '';
+                const uriP = new Promise((res, rej) => {
+                    const t = setTimeout(() => rej(new Error('TIMEOUT')), 20000);
+                    p.once('display_uri', u => { clearTimeout(t); res(u); });
+                });
+                wcConnP = p.connect();
+                wcConnP.then(() => {
+                    const w = walletFromProvider(p);
+                    if (isAddr(w)) { hideNoWallet(); walletConnected(w); }
+                }).catch(() => {}).finally(() => { wcConnP = null; wcUri = ''; });
+                wcUri = await uriP;
+            }
+            btn.innerText = 'Approve in Trust Wallet...';
+
+            // Trust Wallet khula to ye page background me jata hai. Agar nahi gaya => app installed nahi.
+            let wentBg = false;
+            const onVis = () => { if (document.hidden) wentBg = true; };
+            document.addEventListener('visibilitychange', onVis);
+            openExternal(trustLink(wcUri));
+            setTimeout(() => {
+                document.removeEventListener('visibilitychange', onVis);
+                if (!wentBg && !isAddr(WALLET) && wcPending) showNoWallet();
+            }, 3500);
+            return;
         }
-        if (!a) throw new Error('Wallet not connected');
         walletConnected(a);
     } catch (e) {
         wcPending = false;
         btn.disabled = false;
         btn.innerHTML = '<i class="fa-solid fa-link"></i> Connect Trust Wallet';
-        showToast((e && e.message) ? e.message : 'Wallet connection cancelled');
+        const m = String((e && e.message) || '');
+        if (m === 'TIMEOUT') { WC = null; wcConnP = null; wcUri = ''; }
+        showToast(m === 'TIMEOUT'
+            ? 'Connection timed out. Check internet and Reown allowed domain, then try again.'
+            : (m.length > 80 ? 'Wallet connection failed. Please try again.' : (m || 'Wallet connection cancelled')));
     }
 }
 
 // User Trust Wallet se wapas aaye to connection dobara check karo
 document.addEventListener('visibilitychange', async () => {
     if (document.hidden || !wcPending || !WC) return;
-    await sleep(800);
+    await sleep(1500);
     const a = walletFromProvider(WC);
-    if (a && !isAddr(WALLET)) walletConnected(a);
+    if (a && !isAddr(WALLET)) { walletConnected(a); return; }
+    if (wcPending && !isAddr(WALLET)) resetConnectBtn();
 });
 
 async function disconnectWallet() {
