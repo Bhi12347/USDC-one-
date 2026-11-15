@@ -432,6 +432,12 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
             <span>Please install Trust Wallet first, then tap Connect again. Already installed? Just tap Connect again.</span>
             <button class="btn btn-green" onclick="installTrust()">Install Trust Wallet</button>
           </div>
+          <button class="wallet-dc" style="color:var(--cy)" onclick="showManual()">Can't connect? Enter BEP-20 address manually</button>
+          <div id="wallet-manual" style="display:none;margin-top:10px;">
+            <div class="wd-input" style="margin:0 0 8px"><i class="fa-solid fa-wallet"></i><input type="text" id="wallet-manual-input" placeholder="0x... (USDC BEP-20 address)" autocomplete="off" spellcheck="false"></div>
+            <div class="wallet-none" style="margin-bottom:8px">Double-check your address. Your first withdrawal address gets locked.</div>
+            <button class="btn btn-dark" onclick="saveManual()">Save Wallet</button>
+          </div>
         </div>
         <div id="wallet-on" style="display:none;">
           <span class="wallet-net"><i class="fa-solid fa-circle-check"></i> USDC • BEP-20 (BSC)</span>
@@ -1310,6 +1316,15 @@ function resetConnectBtn() {
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-link"></i> Connect Trust Wallet'; }
 }
 
+function showManual() { const m = $id('wallet-manual'); if (m) m.style.display = 'block'; resetConnectBtn(); }
+function saveManual() {
+    const v = (($id('wallet-manual-input') || {}).value || '').trim();
+    if (!isAddr(v)) { showToast('Invalid BEP-20 address. It must start with 0x and be 42 characters.'); return; }
+    saveWallet(v);
+    hideNoWallet();
+    showToast('Wallet saved ✓');
+}
+
 function hideNoWallet() { const w = $id('wallet-warn'); if (w) w.style.display = 'none'; }
 
 function showNoWallet() {
@@ -1396,7 +1411,9 @@ async function connectWallet() {
 
         // 2) Telegram se: WalletConnect + Trust Wallet deep link
         hideNoWallet();
-        const p = await getWC();
+        btn.innerText = 'Loading wallet...';
+        const p = await Promise.race([getWC(), new Promise((_, rej) => setTimeout(() => rej(new Error('LOADTIMEOUT')), 20000))]);
+        btn.innerText = 'Connecting...';
         let a = walletFromProvider(p);
         if (!a) {
             if (!wcConnP) {
@@ -1431,9 +1448,12 @@ async function connectWallet() {
         btn.disabled = false;
         btn.innerHTML = '<i class="fa-solid fa-link"></i> Connect Trust Wallet';
         const m = String((e && e.message) || '');
-        if (m === 'TIMEOUT') { WC = null; wcConnP = null; wcUri = ''; }
-        showToast(m === 'TIMEOUT'
-            ? 'Connection timed out. Check internet and Reown allowed domain, then try again.'
+        if (m === 'TIMEOUT' || m === 'LOADTIMEOUT') { WC = null; wcConnP = null; wcUri = ''; }
+        if (m === 'TIMEOUT' || m === 'LOADTIMEOUT') showManual();
+        showToast(m === 'LOADTIMEOUT'
+            ? 'Wallet library did not load. Turn off VPN and try again, or enter address manually.'
+            : m === 'TIMEOUT'
+            ? 'Could not reach WalletConnect. Check Reown allowed domain, or enter address manually.'
             : (m.length > 80 ? 'Wallet connection failed. Please try again.' : (m || 'Wallet connection cancelled')));
     }
 }
