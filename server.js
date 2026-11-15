@@ -57,6 +57,10 @@ const VERIFY_CHANNELS = [CHANNEL_UPDATES, CHANNEL_PAYOUTS];
 // Task channel verification se alag hai. Bot ko @paymentchanneluta me admin banana zaroori hai (membership check ke liye).
 const TASK_CHANNEL = { id: '@paymentchanneluta', name: 'Telegram Task Channel' };
 
+// Payment proof channel: har approved withdraw yahan auto post hota hai.
+// Bot ko is channel me ADMIN banao (Post Messages permission ke saath). Channel badalna ho to sirf neeche wali line badlo.
+const PAYMENT_CHANNEL = '@cryptotech16';
+
 // YouTube tasks (Open -> Submit -> Claim)
 const YT_TASKS = ['yt1', 'yt2'];
 
@@ -657,12 +661,23 @@ async function resolveWithdraw(reqId, approve) {
 
     const af = { arrayFilters: [{ 'w.id': reqId }] };
     if (approve) {
-        await User.updateOne(
+        const paidUser = await User.findOneAndUpdate(
             { id: pr.userId },
             { $set: { 'withdrawals.$[w].status': 'PAID' }, $inc: { totalWithdrawn: pr.amount } },
-            af
+            { ...af, new: true }
         );
         sendMsg(pr.userId, `✅ Your withdrawal of <b>${fmtU(pr.amount)} USDC</b> has been approved and paid!`);
+
+        // Auto payment proof: channel me username + ID + amount + address post hota hai
+        const uname = paidUser && paidUser.username ? paidUser.username : 'User';
+        sendMsg(PAYMENT_CHANNEL,
+            `✅ <b>New Payment Sent!</b>\n\n` +
+            `👤 User: <b>${esc(uname)}</b>\n` +
+            `🆔 ID: <code>${esc(pr.userId)}</code>\n` +
+            `💰 Amount: <b>${fmtU(pr.amount)} USDC</b> (BEP-20)\n` +
+            `🏦 Address: <code>${esc(pr.address)}</code>\n\n` +
+            `🚀 Earn free USDC with @${BOT_USERNAME}`
+        ).then(r => { if (!r.ok) console.log('Payment channel post failed:', r.description || ''); });
     } else {
         await User.updateOne(
             { id: pr.userId },
