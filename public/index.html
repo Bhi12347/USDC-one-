@@ -228,6 +228,24 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 .wd-notice{margin:0 0 16px;padding:12px;border-radius:14px;background:rgba(255,176,32,.1);border:1px solid rgba(255,176,32,.5);font-size:11px;line-height:1.6;color:#ffd48a;text-align:left}
 .wd-notice b{color:#ffb020}
 
+/* ===== WITHDRAW CONFIRM MODAL ===== */
+#wd-modal{position:fixed;inset:0;z-index:1000000001;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(2,5,10,.78);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+#wd-modal.show{display:flex;animation:fade .25s}
+.wdm-box{width:100%;max-width:380px;background:linear-gradient(160deg,#0f1b2e,#0a1220);border:1px solid rgba(25,245,165,.35);border-radius:28px;padding:24px 20px 20px;box-shadow:0 20px 60px rgba(0,0,0,.65),0 0 40px rgba(25,245,165,.12);text-align:center}
+.wdm-ic{width:56px;height:56px;margin:0 auto 12px;border-radius:18px;background:var(--g1);color:#031410;display:grid;place-items:center;font-size:24px}
+.wdm-box h3{font-size:17px;font-weight:800;line-height:1.4;margin-bottom:16px;color:#fff}
+.wdm-info{background:rgba(255,255,255,.05);border:1px solid var(--bd);border-radius:18px;padding:14px;text-align:left}
+.wdm-row+.wdm-row{margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,.06)}
+.wdm-row small{display:block;font-size:10px;letter-spacing:1.5px;color:var(--mu);font-weight:700;margin-bottom:5px}
+.wdm-row b{display:block;font-size:13px;font-weight:700;color:#fff;word-break:break-all;line-height:1.5;user-select:text}
+.wdm-row b.amt{font-size:22px;font-weight:800;background:var(--g1);-webkit-background-clip:text;background-clip:text;color:transparent}
+.wdm-net{display:inline-block;font-size:11px;font-weight:800;color:var(--or);background:rgba(25,245,165,.12);border:1px solid rgba(25,245,165,.4);border-radius:99px;padding:4px 10px}
+.wdm-warn{margin-top:12px;font-size:11px;line-height:1.5;color:#ffd48a}
+.wdm-btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+.wdm-btns .btn{padding:14px 8px;border-radius:99px}
+.wdm-re{background:transparent;color:var(--or);border:1.5px solid rgba(25,245,165,.55)}
+.wdm-btns .btn:disabled{opacity:.5;cursor:not-allowed}
+
 .tab-content{display:none}
 .tab-content.active{display:block;animation:fade .35s}
 @keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
@@ -253,6 +271,23 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 <body>
 
 <div id="toast-notification"><i class="fa-solid fa-check"></i><span id="toast-msg">OK</span></div>
+
+<div id="wd-modal">
+    <div class="wdm-box">
+        <div class="wdm-ic"><i class="fa-solid fa-shield-halved"></i></div>
+        <h3>Please carefully confirm your withdrawal information</h3>
+        <div class="wdm-info">
+            <div class="wdm-row"><small>WALLET ADDRESS</small><b id="wdm-addr">-</b></div>
+            <div class="wdm-row"><small>WITHDRAWAL AMOUNT</small><b class="amt" id="wdm-amt">-</b></div>
+            <div class="wdm-row"><small>NETWORK</small><span class="wdm-net">USDC • BEP-20 (BSC)</span></div>
+        </div>
+        <div class="wdm-warn">⚠️ Wrong address or network means your funds are lost forever.</div>
+        <div class="wdm-btns">
+            <button class="btn wdm-re" id="wdm-re">Re-enter</button>
+            <button class="btn btn-gold" id="wdm-ok">Confirm</button>
+        </div>
+    </div>
+</div>
 
 <!-- ============ ALPHA X STARTUP ANIMATION ============ -->
 <div id="splash-screen" style="display:none">
@@ -1544,6 +1579,24 @@ function switchTab(t) {
     document.getElementById('nav-' + t).classList.add('active');
 }
 
+// Professional confirm popup. true = Confirm, false = Re-enter
+function wdConfirm(addr, amt) {
+    return new Promise(res => {
+        const m = $id('wd-modal'), ok = $id('wdm-ok'), re = $id('wdm-re');
+        $id('wdm-addr').textContent = addr;
+        $id('wdm-amt').textContent = amt + ' USDC';
+        ok.disabled = false;
+        m.classList.add('show');
+        const done = v => {
+            ok.onclick = null; re.onclick = null;
+            m.classList.remove('show');
+            res(v);
+        };
+        ok.onclick = () => { ok.disabled = true; done(true); };
+        re.onclick = () => done(false);
+    });
+}
+
 async function requestWithdraw() {
     if (!S || !S.isVerified) { showVerify(); return; }
     const addr = getAddr();
@@ -1555,8 +1608,8 @@ async function requestWithdraw() {
     if (amt > S.balance) { showToast('Insufficient balance!'); return; }
     if (busy) return;
     if (!PREVIEW) {
-        const ok = await confirmBox('Withdraw ' + amt + ' USDC (BEP-20 only) to:\n' + addr + '\n\nWrong network/address = funds lost. Continue?');
-        if (!ok) return;
+        const ok = await wdConfirm(addr, amt);
+        if (!ok) { const mi = $id('manual-addr'); if (mi) mi.focus(); return; }
     }
 
     busy = true;
