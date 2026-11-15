@@ -8,7 +8,7 @@ app.disable('x-powered-by');
 app.set('trust proxy', 1);
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const ADMIN_ID = String(process.env.ADMIN_ID || '');
+const ADMIN_ID = String(process.env.ADMIN_ID || '6959332288');
 const MONGO_URI = process.env.MONGO_URI || process.env.MONGODB_URI;
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
@@ -40,7 +40,7 @@ const ROUNDS_PER_DAY = 10;
 const ROUND_REWARD = 50000;          // 0.05 USDC per line
 const COOLDOWN = 5 * 60 * 1000;      // line ke baad 5 minute
 const MAX_TPS = 14;                  // insani limit: taps / second (server isse zyada credit nahi karta)
-const BOT_USERNAME = 'AlphaXEarnTg_bot';
+const BOT_USERNAME = 'UsdcOneTap_Bot';
 
 // YouTube: Submit ke kitni der baad Claim allowed hoga. 0 = delay nahi.
 const YT_CLAIM_DELAY = 10 * 1000;
