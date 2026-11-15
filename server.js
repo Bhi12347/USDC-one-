@@ -3,6 +3,10 @@ const mongoose = require('mongoose');
 const crypto = require('crypto');
 const path = require('path');
 
+// ethers sirf auto-payout ke liye chahiye. Install: npm i ethers
+let ethers = null;
+try { ethers = require('ethers'); } catch (e) { console.log('ℹ️ ethers not installed - auto payout disabled (run: npm i ethers)'); }
+
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -32,6 +36,60 @@ const TASK_REWARD = 300000;          // 0.3 USDC per task
 const REF_BONUS = 300000;            // 0.3 USDC per referral
 const MIN_WITHDRAW = 2 * U;          // 2 USDC
 
+// ---------- AUTO PAYOUT (USDC BEP-20 / BSC) ----------
+// Render env me set karo:
+//   PAYOUT_PRIVATE_KEY = payout wallet ki private key (sirf env me, kabhi code me nahi). Is wallet me USDC + thora BNB (gas) rakho.
+//   BSC_RPC            = (optional) default https://bsc-dataseed.binance.org/
+//   AUTO_PAYOUT        = 'false' likho to auto band (admin approve karega). Default: key ho to ON.
+//   MAX_AUTO_PAYOUT    = (optional) is amount (USDC) se bade withdraw admin approval par jayenge. Default 20.
+// Key na ho to purana manual approve system chalta hai.
+const PAYOUT_PRIVATE_KEY = (process.env.PAYOUT_PRIVATE_KEY || '').trim();
+const BSC_RPC = process.env.BSC_RPC || 'https://bsc-dataseed.binance.org/';
+const USDC_BSC = '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d';   // Binance-Peg USDC (BEP-20), 18 decimals
+const USDC_DECIMALS = 18;
+const AUTO_PAYOUT = process.env.AUTO_PAYOUT !== 'false';
+const MAX_AUTO_PAYOUT = toMicro(process.env.MAX_AUTO_PAYOUT || 20);
+const MIN_GAS_BNB = '0.0005';
+
+let payoutWallet = null, usdcContract = null, payoutProvider = null;
+if (ethers && PAYOUT_PRIVATE_KEY) {
+    try {
+        payoutProvider = new ethers.JsonRpcProvider(BSC_RPC, 56, { staticNetwork: ethers.Network.from(56) });
+        payoutWallet = new ethers.Wallet(PAYOUT_PRIVATE_KEY, payoutProvider);
+        usdcContract = new ethers.Contract(USDC_BSC, [
+            'function transfer(address to, uint256 amount) returns (bool)',
+            'function balanceOf(address) view returns (uint256)'
+        ], payoutWallet);
+        console.log('✅ Payout wallet ready:', payoutWallet.address);
+    } catch (e) {
+        console.error('❌ Invalid PAYOUT_PRIVATE_KEY:', e.message);
+        payoutWallet = null; usdcContract = null;
+    }
+}
+const payoutReady = () => !!(payoutWallet && usdcContract);
+
+// USDC on-chain bhejo. Success par { hash }, fail par error throw (paise nahi gaye).
+async function sendUsdc(address, microAmount) {
+    if (!payoutReady()) throw new Error('Payout wallet not configured');
+    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) throw new Error('Invalid address');
+    const units = ethers.parseUnits(fmtU(microAmount), USDC_DECIMALS);
+
+    const bal = await usdcContract.balanceOf(payoutWallet.address);
+    if (bal < units) throw new Error('Payout wallet has not enough USDC');
+    const gas = await payoutProvider.getBalance(payoutWallet.address);
+    if (gas < ethers.parseEther(MIN_GAS_BNB)) throw new Error('Payout wallet needs BNB for gas');
+
+    const tx = await usdcContract.transfer(address, units);
+    try {
+        const rc = await tx.wait(1, 90000);
+        if (rc && rc.status === 0) throw new Error('REVERTED');
+    } catch (e) {
+        if (String(e.message) === 'REVERTED') throw new Error('Transaction reverted on-chain');
+        // timeout: tx bhej di gayi hai, confirm hone me der. Paid maan lo.
+    }
+    return { hash: tx.hash };
+}
+
 // ---------- TAP SYSTEM ----------
 // Ek line = TAP_TARGET taps. Line poori hone par seedha nayi line (koi wait nahi). Din me ROUNDS_PER_DAY lines.
 // 10 lines x 0.05 = 0.5 USDC / din.  (Frontend ke constants se match hona zaroori hai)
@@ -57,7 +115,7 @@ const VERIFY_CHANNELS = [CHANNEL_UPDATES, CHANNEL_PAYOUTS];
 // Task channel verification se alag hai. Bot ko @paymentchanneluta me admin banana zaroori hai (membership check ke liye).
 const TASK_CHANNEL = { id: '@paymentchanneluta', name: 'Telegram Task Channel' };
 
-// Payment proof channel: har approved withdraw yahan auto post hota hai.
+// Payment proof channel: har paid withdraw yahan auto post hota hai.
 // Bot ko is channel me ADMIN banao (Post Messages permission ke saath). Channel badalna ho to sirf neeche wali line badlo.
 const PAYMENT_CHANNEL = '@cryptotech16';
 
@@ -587,9 +645,13 @@ app.post('/api/yt/claim', auth, wrap(ytClaim));
 app.post('/api/proof/start', auth, wrap(ytSubmit));
 app.post('/api/proof/claim', auth, wrap(ytClaim));
 
-// ---------- WITHDRAW (USDC BEP-20, Trust Wallet) ----------
+// ---------- WITHDRAW (USDC BEP-20: Trust Wallet connect ya manual address) ----------
 // Pehle withdraw par wallet account se lock ho jata hai. Baad me sirf usi wallet par withdraw hoga.
 // Ek wallet sirf ek account par chal sakta hai.
+// Auto payout ON ho aur amount <= MAX_AUTO_PAYOUT ho to USDC seedha on-chain bhej diya jata hai,
+// warna admin ko Approve / Reject ka message jata hai.
+const adminButtons = reqId => ({ inline_keyboard: [[{ text: '✅ Approve', callback_data: `approve_${reqId}` }, { text: '❌ Reject', callback_data: `reject_${reqId}` }]] });
+
 app.post('/api/withdraw', auth, wrap(async (req, res) => {
     const u = req.user;
     if (!rl('wd:' + u.id, 5, 60000)) return res.json({ ok: false, error: 'Too many attempts. Please wait a minute.' });
@@ -606,7 +668,7 @@ app.post('/api/withdraw', auth, wrap(async (req, res) => {
 
     const addr = address.toLowerCase();
     if (u.wallet && u.wallet !== addr) {
-        return res.json({ ok: false, error: 'Withdrawals go only to your first connected wallet. Contact support to change it.' });
+        return res.json({ ok: false, error: 'Withdrawals go only to your first used wallet. Contact support to change it.' });
     }
     if (!u.wallet) {
         try {
@@ -616,7 +678,7 @@ app.post('/api/withdraw', auth, wrap(async (req, res) => {
             throw e;
         }
         const fresh = await User.findOne({ id: u.id });
-        if (!fresh || fresh.wallet !== addr) return res.json({ ok: false, error: 'Withdrawals go only to your first connected wallet.' });
+        if (!fresh || fresh.wallet !== addr) return res.json({ ok: false, error: 'Withdrawals go only to your first used wallet.' });
     }
 
     const reqId = 'wd_' + crypto.randomBytes(6).toString('hex');
@@ -646,47 +708,106 @@ app.post('/api/withdraw', auth, wrap(async (req, res) => {
         return res.json({ ok: false, error: 'Insufficient balance!' });
     }
 
+    const view = await userView(upd);
+
+    // AUTO PAYOUT
+    if (AUTO_PAYOUT && payoutReady() && amt <= MAX_AUTO_PAYOUT) {
+        res.json({ ok: true, data: view });
+        autoPayout(reqId, u.id, amt, address).catch(e => console.log('autoPayout error:', e));
+        return;
+    }
+
+    // MANUAL: admin approve karega
     sendMsg(ADMIN_ID,
         `📤 <b>New Withdraw Request</b>\n\n👤 User ID: <code>${esc(u.id)}</code>\n💰 Amount: <b>${fmtU(amt)} USDC</b> (BEP-20)\n🏦 Address: <code>${esc(address)}</code>`,
-        { inline_keyboard: [[{ text: '✅ Approve', callback_data: `approve_${reqId}` }, { text: '❌ Reject', callback_data: `reject_${reqId}` }]] }
+        adminButtons(reqId)
     );
-    res.json({ ok: true, data: await userView(upd) });
+    res.json({ ok: true, data: view });
 }));
 
+async function autoPayout(reqId, userId, amt, address) {
+    const r = await resolveWithdraw(reqId, true);
+    if (r.ok) {
+        sendMsg(ADMIN_ID, `🤖 <b>Auto payout sent</b>\n\n👤 User ID: <code>${esc(userId)}</code>\n💰 ${fmtU(amt)} USDC (BEP-20)\n🏦 <code>${esc(address)}</code>` +
+            (r.txHash ? `\n🔗 https://bscscan.com/tx/${esc(r.txHash)}` : ''));
+    } else {
+        sendMsg(ADMIN_ID,
+            `⚠️ <b>Auto payout failed</b>\n\n👤 User ID: <code>${esc(userId)}</code>\n💰 ${fmtU(amt)} USDC (BEP-20)\n🏦 <code>${esc(address)}</code>\n\nReason: ${esc(r.message || 'unknown')}` +
+            (r.restored ? '\n\nRequest is pending. Fix the issue and approve manually, or reject to refund.' : ''),
+            r.restored ? adminButtons(reqId) : undefined
+        );
+    }
+}
+
 // ---------- WITHDRAW RESOLVE ----------
+
+async function markPaid(pr, txHash) {
+    const set = { 'withdrawals.$[w].status': 'PAID' };
+    if (txHash) set['withdrawals.$[w].tx'] = txHash;
+    const paidUser = await User.findOneAndUpdate(
+        { id: pr.userId },
+        { $set: set, $inc: { totalWithdrawn: pr.amount } },
+        { arrayFilters: [{ 'w.id': pr.reqId }], new: true }
+    );
+    sendMsg(pr.userId, `✅ Your withdrawal of <b>${fmtU(pr.amount)} USDC</b> has been paid!` +
+        (txHash ? `\n🔗 <a href="https://bscscan.com/tx/${esc(txHash)}">View transaction</a>` : ''));
+
+    // Auto payment proof: channel me username + ID + amount + address post hota hai
+    const uname = paidUser && paidUser.username ? paidUser.username : 'User';
+    sendMsg(PAYMENT_CHANNEL,
+        `✅ <b>New Payment Sent!</b>\n\n` +
+        `👤 User: <b>${esc(uname)}</b>\n` +
+        `🆔 ID: <code>${esc(pr.userId)}</code>\n` +
+        `💰 Amount: <b>${fmtU(pr.amount)} USDC</b> (BEP-20)\n` +
+        `🏦 Address: <code>${esc(pr.address)}</code>\n` +
+        (txHash ? `🔗 <a href="https://bscscan.com/tx/${esc(txHash)}">Transaction</a>\n` : '') +
+        `\n🚀 Earn free USDC with @${BOT_USERNAME}`
+    ).then(r => { if (!r.ok) console.log('Payment channel post failed:', r.description || ''); });
+}
+
+// Payout fail hone par request wapas pending me (agar user ne beech me nayi request na bana li ho), warna refund
+async function restorePending(pr) {
+    try {
+        await PendingRequest.create({ reqId: pr.reqId, userId: pr.userId, amount: pr.amount, address: pr.address });
+        return true;
+    } catch (e) {
+        await User.updateOne(
+            { id: pr.userId },
+            { $set: { 'withdrawals.$[w].status': 'DECLINED' }, $inc: { balance: pr.amount } },
+            { arrayFilters: [{ 'w.id': pr.reqId }] }
+        );
+        sendMsg(pr.userId, `❌ Your withdrawal of <b>${fmtU(pr.amount)} USDC</b> could not be processed and the amount was refunded.`);
+        return false;
+    }
+}
 
 async function resolveWithdraw(reqId, approve) {
     const pr = await PendingRequest.findOneAndDelete({ reqId: String(reqId) });
     if (!pr) return { ok: false, message: 'Request already handled / not found' };
 
-    const af = { arrayFilters: [{ 'w.id': reqId }] };
+    let txHash = null;
     if (approve) {
-        const paidUser = await User.findOneAndUpdate(
-            { id: pr.userId },
-            { $set: { 'withdrawals.$[w].status': 'PAID' }, $inc: { totalWithdrawn: pr.amount } },
-            { ...af, new: true }
-        );
-        sendMsg(pr.userId, `✅ Your withdrawal of <b>${fmtU(pr.amount)} USDC</b> has been approved and paid!`);
-
-        // Auto payment proof: channel me username + ID + amount + address post hota hai
-        const uname = paidUser && paidUser.username ? paidUser.username : 'User';
-        sendMsg(PAYMENT_CHANNEL,
-            `✅ <b>New Payment Sent!</b>\n\n` +
-            `👤 User: <b>${esc(uname)}</b>\n` +
-            `🆔 ID: <code>${esc(pr.userId)}</code>\n` +
-            `💰 Amount: <b>${fmtU(pr.amount)} USDC</b> (BEP-20)\n` +
-            `🏦 Address: <code>${esc(pr.address)}</code>\n\n` +
-            `🚀 Earn free USDC with @${BOT_USERNAME}`
-        ).then(r => { if (!r.ok) console.log('Payment channel post failed:', r.description || ''); });
+        if (payoutReady()) {
+            try {
+                // ek waqt me ek hi on-chain payment (nonce clash se bachao)
+                const out = await withLock('payout', () => sendUsdc(pr.address, pr.amount));
+                txHash = out.hash;
+            } catch (e) {
+                console.log('Payout failed:', e.message);
+                const restored = await restorePending(pr);
+                return { ok: false, restored, message: 'Payout failed: ' + String(e.shortMessage || e.message).slice(0, 150) };
+            }
+        }
+        await markPaid({ reqId: String(reqId), userId: pr.userId, amount: pr.amount, address: pr.address }, txHash);
     } else {
         await User.updateOne(
             { id: pr.userId },
             { $set: { 'withdrawals.$[w].status': 'DECLINED' }, $inc: { balance: pr.amount } },
-            af
+            { arrayFilters: [{ 'w.id': String(reqId) }] }
         );
         sendMsg(pr.userId, `❌ Your withdrawal of <b>${fmtU(pr.amount)} USDC</b> was declined and the amount was refunded.`);
     }
-    return { ok: true, pr };
+    return { ok: true, pr, txHash };
 }
 
 // ---------- TELEGRAM WEBHOOK ----------
@@ -746,7 +867,7 @@ app.post('/api/webhook', async (req, res) => {
 
             const approve = m[1] === 'approve';
             const r = await resolveWithdraw(m[2], approve);
-            if (!r.ok) return tg('answerCallbackQuery', { callback_query_id: q.id, text: 'Already handled!' });
+            if (!r.ok) return tg('answerCallbackQuery', { callback_query_id: q.id, text: String(r.message || 'Already handled!').slice(0, 190), show_alert: true });
 
             tg('editMessageText', {
                 chat_id: chatId,
@@ -848,6 +969,10 @@ app.get('/admin/dashboard', checkAdmin, wrap(async (req, res) => {
         userBox = '<p style="color:#ef4444">User not found!</p>';
     }
 
+    const payInfo = payoutReady()
+        ? `Auto payout: <b>${AUTO_PAYOUT ? 'ON' : 'OFF'}</b> (max ${fmtU(MAX_AUTO_PAYOUT)} USDC) | Wallet: <code>${esc(payoutWallet.address)}</code>`
+        : 'Auto payout: <b>not configured</b> (manual approve)';
+
     res.send(`<!DOCTYPE html><html><head><title>USDC ONE Admin</title><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>*{box-sizing:border-box;font-family:'Segoe UI',sans-serif}body{background:#05080f;color:#f3f4f6;margin:0;padding:16px}h1{color:#19f5a5;font-size:22px;margin:0}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
 .lo{background:#ef4444;color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:12px;font-weight:bold}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px}
@@ -857,6 +982,7 @@ input,textarea{background:#05080f;border:1px solid #2a3a55;color:#fff;padding:10
 .b{background:#19f5a5;color:#031410;border:none;font-weight:bold;padding:9px 14px;border-radius:8px;cursor:pointer}.b.g{background:#22c55e;color:#fff}.b.r{background:#ef4444;color:#fff}
 table{width:100%;border-collapse:collapse}th,td{padding:8px;text-align:left;border-bottom:1px solid #1d2a40;font-size:12px;word-break:break-all}th{color:#7e8ba3}.box{background:#05080f;padding:12px;border-radius:8px;border:1px solid #1d2a40;margin-top:10px;font-size:13px;line-height:1.8}</style></head><body>
 <div class="top"><h1>👑 USDC ONE Admin</h1><a class="lo" href="/admin/logout">Logout</a></div>
+<p style="font-size:12px;color:#7e8ba3;margin-bottom:12px;word-break:break-all">${payInfo}</p>
 <div class="grid">
 <div class="st"><small>Total Users</small><div>${totalUsers}</div></div>
 <div class="st"><small>Verified Users</small><div>${verified}</div></div>
@@ -956,6 +1082,7 @@ app.use('/api', (req, res) => res.status(404).json({ ok: false, error: 'Not foun
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
     console.log(`Server running on port ${PORT}`);
+    console.log(payoutReady() ? `💸 Auto payout: ${AUTO_PAYOUT ? 'ON' : 'OFF'} (max ${fmtU(MAX_AUTO_PAYOUT)} USDC)` : '💸 Auto payout: not configured (manual approve)');
     if (PUBLIC_URL.startsWith('https://')) {
         const r = await tg('setWebhook', {
             url: `${PUBLIC_URL}/api/webhook`,
