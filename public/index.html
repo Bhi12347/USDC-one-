@@ -1283,13 +1283,53 @@ function saveWallet(a) {
     renderWallet();
 }
 
-function loadScript(src) {
+function loadScript(src, ms) {
     return new Promise((res, rej) => {
         const s = document.createElement('script');
-        s.src = src; s.onload = res; s.onerror = () => rej(new Error('load'));
+        const t = setTimeout(() => { s.remove(); rej(new Error('load timeout')); }, ms || 12000);
+        s.src = src;
+        s.onload = () => { clearTimeout(t); res(); };
+        s.onerror = () => { clearTimeout(t); s.remove(); rej(new Error('load')); };
         document.head.appendChild(s);
     });
 }
+
+// WalletConnect library: kai CDN se try, aur app khulte hi background me pehle se load (taake Connect par wait na ho)
+const WC_SOURCES = [
+    'https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.17.0/dist/index.umd.js',
+    'https://unpkg.com/@walletconnect/ethereum-provider@2.17.0/dist/index.umd.js',
+    'https://fastly.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.17.0/dist/index.umd.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/walletconnect-ethereum-provider/2.17.0/index.umd.js'
+];
+let wcLib = null, wcLibP = null;
+function loadWCLib() {
+    if (wcLib) return Promise.resolve(wcLib);
+    if (wcLibP) return wcLibP;
+    const pick = g => g && (g.EthereumProvider || (g.default && g.default.EthereumProvider) || g.default || g);
+    const ok = x => x && typeof x.init === 'function';
+    wcLibP = (async () => {
+        for (const src of WC_SOURCES) {
+            try {
+                await loadScript(src, 10000);
+                const EP = pick(window['@walletconnect/ethereum-provider'])
+                    || pick(window.WalletConnectEthereumProvider)
+                    || pick(window.EthereumProvider);
+                if (ok(EP)) { wcLib = EP; return EP; }
+            } catch (e) {}
+        }
+        try {   // last fallback: ES module
+            const m = await Promise.race([
+                import('https://esm.sh/@walletconnect/ethereum-provider@2.17.0'),
+                new Promise((_, rej) => setTimeout(() => rej(new Error('esm timeout')), 15000))
+            ]);
+            const EP = m.EthereumProvider || (m.default && m.default.EthereumProvider) || m.default;
+            if (ok(EP)) { wcLib = EP; return EP; }
+        } catch (e) {}
+        throw new Error('LIBFAIL');
+    })().catch(e => { wcLibP = null; throw e; });
+    return wcLibP;
+}
+setTimeout(() => { loadWCLib().catch(() => {}); }, 1500);
 
 
 let wcPending = false;
@@ -1345,23 +1385,7 @@ function walletFromProvider(p) {
 async function getWC() {
     if (WC) return WC;
     if (!WC_PROJECT_ID || WC_PROJECT_ID.indexOf('YOUR_') === 0) throw new Error('WalletConnect Project ID missing in file');
-    const pick = g => g && (g.EthereumProvider || (g.default && g.default.EthereumProvider) || g.default || g);
-    const ok = x => x && typeof x.init === 'function';
-
-    let EP = null;
-    try {
-        await loadScript('https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.17.0/dist/index.umd.js');
-        EP = pick(window['@walletconnect/ethereum-provider'])
-          || pick(window.WalletConnectEthereumProvider)
-          || pick(window.EthereumProvider);
-    } catch (e) {}
-
-    // Fallback: agar UMD se na mile to ES module se load karo
-    if (!ok(EP)) {
-        const m = await import('https://esm.sh/@walletconnect/ethereum-provider@2.17.0');
-        EP = m.EthereumProvider || (m.default && m.default.EthereumProvider) || m.default;
-    }
-    if (!ok(EP)) throw new Error('WalletConnect failed to load');
+    const EP = await loadWCLib();
 
     const p = await EP.init({
         projectId: WC_PROJECT_ID,
@@ -1414,7 +1438,7 @@ async function connectWallet() {
         // 2) Telegram se: WalletConnect + Trust Wallet deep link
         hideNoWallet();
         btn.innerText = 'Loading wallet...';
-        const p = await Promise.race([getWC(), new Promise((_, rej) => setTimeout(() => rej(new Error('LOADTIMEOUT')), 20000))]);
+        const p = await Promise.race([getWC(), new Promise((_, rej) => setTimeout(() => rej(new Error('LOADTIMEOUT')), 55000))]);
         btn.innerText = 'Connecting...';
         let a = walletFromProvider(p);
         if (!a) {
@@ -1450,7 +1474,9 @@ async function connectWallet() {
         btn.disabled = false;
         btn.innerHTML = '<i class="fa-solid fa-link"></i> Connect Trust Wallet';
         const m = String((e && e.message) || '');
-        if (m === 'TIMEOUT' || m === 'LOADTIMEOUT') {
+        if (m === 'LIBFAIL') {
+            showToast('Wallet files could not load. Turn off VPN or switch WiFi / mobile data, then tap Connect again.');
+        } else if (m === 'TIMEOUT' || m === 'LOADTIMEOUT') {
             WC = null; wcConnP = null; wcUri = '';
             const reachable = await checkRelay();
             showToast(reachable
