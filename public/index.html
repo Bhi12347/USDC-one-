@@ -921,7 +921,7 @@ async function startApp() {
     const seen = await axSeen();
     if (dev.conflict) { showBlocked(); return; }
 
-    const r = await api('/api/me', null, 3);
+    const r = await api('/api/me', null, 20);   // Render free server jagne me ~1 min leta hai, isliye lamba retry
     const loader = $id('ax-loader');
     if (loader) loader.style.display = 'none';
 
