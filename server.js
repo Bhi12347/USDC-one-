@@ -33,12 +33,12 @@ const REF_BONUS = 300000;            // 0.3 USDC per referral
 const MIN_WITHDRAW = 2 * U;          // 2 USDC
 
 // ---------- TAP SYSTEM ----------
-// Ek line = TAP_TARGET taps. Line poori hone par COOLDOWN, phir nayi line. Din me ROUNDS_PER_DAY lines.
+// Ek line = TAP_TARGET taps. Line poori hone par seedha nayi line (koi wait nahi). Din me ROUNDS_PER_DAY lines.
 // 10 lines x 0.05 = 0.5 USDC / din.  (Frontend ke constants se match hona zaroori hai)
 const TAP_TARGET = 30;
 const ROUNDS_PER_DAY = 10;
 const ROUND_REWARD = 50000;          // 0.05 USDC per line
-const COOLDOWN = 5 * 60 * 1000;      // line ke baad 5 minute
+const COOLDOWN = 0;                  // line ke baad koi wait nahi (timer band)
 const MAX_TPS = 14;                  // insani limit: taps / second (server isse zyada credit nahi karta)
 const BOT_USERNAME = 'UsdcOneTap_Bot';
 
@@ -445,7 +445,8 @@ app.post('/api/verify', auth, wrap(async (req, res) => {
 
 // ---------- TAP (har tap par USDC) ----------
 // Frontend taps batch me bhejta hai: { taps: n }. Server:
-//  - din ki limit (ROUNDS_PER_DAY), line ka cooldown, aur insani raftaar (MAX_TPS) enforce karta hai
+//  - din ki limit (ROUNDS_PER_DAY) aur insani raftaar (MAX_TPS) enforce karta hai
+//  - line poori hote hi counter 0 ho jata hai, seedha nayi line (COOLDOWN = 0)
 //  - sirf wahi taps credit karta hai jo allowed hon, baqi chhod deta hai
 //  - balance atomic update hota hai, ek user ke requests lock se serial chalte hain
 app.post('/api/tap', auth, wrap(async (req, res) => {
