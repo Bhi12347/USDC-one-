@@ -54,8 +54,8 @@ const CHANNEL_PAYOUTS = { id: '@cryptotech16', name: 'Official Payouts Channel',
 const VERIFY_CHANNELS = [CHANNEL_UPDATES, CHANNEL_PAYOUTS];
 
 // Telegram task (auto verify)
-// NOTE: yeh channel ab VERIFY_CHANNELS me bhi hai, isliye verified user ko tg2 task turant mil jata hai.
-const TASK_CHANNEL = { id: '@cryptotech16', name: 'Telegram Channel 2' };
+// Task channel verification se alag hai. Bot ko @paymentchanneluta me admin banana zaroori hai (membership check ke liye).
+const TASK_CHANNEL = { id: '@paymentchanneluta', name: 'Telegram Task Channel' };
 
 // YouTube tasks (Open -> Submit -> Claim)
 const YT_TASKS = ['yt1', 'yt2'];
