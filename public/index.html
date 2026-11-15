@@ -323,21 +323,24 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
     <div class="verify-logo-box" style="overflow:hidden;padding:0"><img src="https://i.ibb.co/fGHVxxrz/IMG-20261115-110810-842.jpg" alt="USDC ONE" style="width:100%;height:100%;object-fit:cover"></div>
     <div class="verify-card">
         <h3 style="font-size:26px;font-weight:900;color:#fff;margin-bottom:8px;">Verification Required</h3>
-        <p style="font-size:14px;color:#7fe9ff;margin-bottom:20px;">Join both channels, then tap Check again</p>
+        <p style="font-size:14px;color:#7fe9ff;margin-bottom:20px;">Join all channels, then tap Check again</p>
 
+        <!-- Verification: Channel 1 -->
         <a href="https://t.me/updatechanneluta" class="channel-item" onclick="return openChannel(event,this)">
             <div class="channel-info"><span class="channel-badge"><i class="fa-solid fa-bullhorn"></i><em>CHANNEL</em></span>
-            <div class="channel-details"><h5>Channel 1</h5></div></div>
+            <div class="channel-details"><h5>Join Channel 1</h5></div></div>
             <i class="fa-solid fa-chevron-right"></i>
         </a>
+        <!-- Verification: YouTube -->
         <a href="https://youtube.com/@cryptotech2.1?si=A6C0ifRC2he49Rpg" class="channel-item" onclick="return openChannel(event,this)">
             <div class="channel-info"><span class="channel-badge"><i class="fa-brands fa-youtube"></i><em>YOUTUBE</em></span>
             <div class="channel-details"><h5>Subscribe YouTube</h5></div></div>
             <i class="fa-solid fa-chevron-right"></i>
         </a>
-        <a href="https://t.me/paymentchanneluta" class="channel-item" onclick="return openChannel(event,this)">
+        <!-- Verification: Channel 3 -->
+        <a href="https://t.me/cryptotech16" class="channel-item" onclick="return openChannel(event,this)">
             <div class="channel-info"><span class="channel-badge"><i class="fa-solid fa-bullhorn"></i><em>CHANNEL</em></span>
-            <div class="channel-details"><h5>Channel 3</h5></div></div>
+            <div class="channel-details"><h5>Join Channel 3</h5></div></div>
             <i class="fa-solid fa-chevron-right"></i>
         </a>
 
@@ -387,15 +390,18 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
     <div class="title-header">Tasks</div>
     <p class="sub">Complete social tasks and earn <b>0.3 USDC</b> each.</p>
     <div class="card">
+      <!-- Task: Join Telegram -->
       <div class="task"><div class="ti tg"><i class="fa-brands fa-telegram"></i></div>
-        <div class="tm"><b>Join Telegram Channel 2</b><span>+0.3 USDC</span></div>
-        <button class="btn btn-green" id="task-tg2-btn" onclick="handleTask('tg2','https://t.me/cryptotech16')">Start</button></div>
+        <div class="tm"><b>Join Telegram</b><span>+0.3 USDC</span></div>
+        <button class="btn btn-green" id="task-tg2-btn" onclick="handleTask('tg2','https://t.me/paymentchanneluta')">Start</button></div>
+      <!-- Task: YouTube 1 -->
       <div class="task"><div class="ti yt"><i class="fa-brands fa-youtube"></i></div>
-        <div class="tm"><b>Subscribe YouTube</b><span>+0.3 USDC</span><small>Subscribe, submit your task &amp; claim your reward!</small></div>
-        <button class="btn btn-green" id="task-yt1-btn" onclick="handleYT('yt1','https://youtube.com/@cryptotech2.1?si=A6C0ifRC2he49Rpg')">Open</button></div>
+        <div class="tm"><b>YouTube 1</b><span>+0.3 USDC</span><small>Subscribe, submit your task &amp; claim your reward!</small></div>
+        <button class="btn btn-green" id="task-yt1-btn" onclick="handleYT('yt1','https://youtube.com/@cryptotech2.1?si=Se0lLUv35lh1wVTn')">Open</button></div>
+      <!-- Task: YouTube 2 -->
       <div class="task"><div class="ti yt"><i class="fa-brands fa-youtube"></i></div>
-        <div class="tm"><b>Subscribe YouTube 2</b><span>+0.3 USDC</span><small>Subscribe, submit your task &amp; claim your reward!</small></div>
-        <button class="btn btn-green" id="task-yt2-btn" onclick="handleYT('yt2','https://youtube.com/@noor-e-eman-j4x?si=5uLYuYOp139kj9sJ')">Open</button></div>
+        <div class="tm"><b>YouTube 2</b><span>+0.3 USDC</span><small>Subscribe, submit your task &amp; claim your reward!</small></div>
+        <button class="btn btn-green" id="task-yt2-btn" onclick="handleYT('yt2','https://youtube.com/@noor-e-eman-j4x?si=c2J3wV8q8aTyg1GF')">Open</button></div>
     </div>
   </section>
 
