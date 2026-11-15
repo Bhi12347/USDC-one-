@@ -1,4 +1,4 @@
-<! html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -480,6 +480,15 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 const TASK_BTN = { tg2: 'task-tg2-btn', yt1: 'task-yt1-btn', yt2: 'task-yt2-btn' };
 
+// ===== TAP CONSTANTS (server ke constants se match) =====
+const TAP_TARGET = 30;                       // ek line = 30 taps
+const ROUNDS_PER_DAY = 10;                   // din me 10 lines
+const ROUND_REWARD = 0.05;                   // ek line = 0.05 USDC  (10 x 0.05 = 0.5 / day)
+const TAP_REWARD = ROUND_REWARD / TAP_TARGET; // ~0.001667 USDC per tap
+const ROUND_COOLDOWN = 5 * 60 * 1000;        // line ke baad 5 minute
+const MAX_TPS = 14;                          // insani limit: max taps / second
+const FLUSH_EVERY = 10;
+
 let S = null;
 let timeOffset = 0;
 const taskState = {};
@@ -566,7 +575,15 @@ async function api(path, body, retries = 0) {
             const text = await r.text();
             let data;
             try { data = JSON.parse(text); }
-            catch (e) { return { ok: false, error: 'Server is busy (' + r.status + '), please try again shortly' }; }
+            catch (e) {
+                // Render server band / start ho raha ho to HTML 404/502/503 aata hai
+                if (attempt < retries) { await sleep(3000); continue; }
+                return { ok: false, error: (r.status === 404 || r.status >= 500)
+                    ? 'Server is starting, please try again in a minute'
+                    : 'Server is busy (' + r.status + '), please try again shortly' };
+            }
+            // DB abhi connect ho raha hai: retry karo
+            if (r.status === 503 && attempt < retries) { await sleep(3000); continue; }
             if (!r.ok && !data.error) data.error = 'Server error (' + r.status + ')';
             return data;
         } catch (e) {
@@ -937,7 +954,6 @@ async function startApp() {
         showVerify();
     }
 }
-startApp();
 
 function copyRefLink() {
     const i = document.getElementById('ref-link');
@@ -971,13 +987,6 @@ function renderReferrals() {
 
 // ===== TAP SYSTEM (har tap par USDC) =====
 // Har tap par balance live badhta hai. Taps server ko batch me jate hain; server hi asli balance aur limits rakhta hai.
-const TAP_TARGET = 30;                       // ek line = 30 taps
-const ROUNDS_PER_DAY = 10;                   // din me 10 lines
-const ROUND_REWARD = 0.05;                   // ek line = 0.05 USDC  (10 x 0.05 = 0.5 / day)
-const TAP_REWARD = ROUND_REWARD / TAP_TARGET; // ~0.001667 USDC per tap
-const ROUND_COOLDOWN = 5 * 60 * 1000;        // line ke baad 5 minute
-const MAX_TPS = 14;                          // insani limit: max taps / second
-const FLUSH_EVERY = 10;
 let pending = 0, inflight = 0, tapBusy = false, flushT = null;
 let tapTimes = [], strikes = 0, tapLockUntil = 0;
 
@@ -1403,6 +1412,9 @@ async function requestWithdraw() {
     showToast('Withdrawal request submitted!');
     document.getElementById('withdraw-amount').value = '';
 }
+
+// App start (sab functions aur constants ke baad)
+startApp();
 </script>
 </body>
 </html>
