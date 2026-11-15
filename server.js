@@ -45,24 +45,25 @@ const BOT_USERNAME = 'UsdcOneTap_Bot';
 // YouTube: Submit ke kitni der baad Claim allowed hoga. 0 = delay nahi.
 const YT_CLAIM_DELAY = 10 * 1000;
 
+// ---------- CHANNELS ----------
+// Welcome message ke buttons aur app verification dono yehi 2 channels use karte hain.
+const CHANNEL_UPDATES = { id: '@updatechanneluta', name: 'Official Updates Channel', url: 'https://t.me/updatechanneluta' };
+const CHANNEL_PAYOUTS = { id: '@cryptotech16', name: 'Official Payouts Channel', url: 'https://t.me/cryptotech16' };
+
 // Verification ke liye channels (app khulne par dono join hone zaroori)
-const VERIFY_CHANNELS = [
-    { id: '@updatechanneluta', name: 'Channel 1' },
-    { id: '@paymentchanneluta', name: 'Channel 2' }
-];
+const VERIFY_CHANNELS = [CHANNEL_UPDATES, CHANNEL_PAYOUTS];
 
 // Telegram task (auto verify)
+// NOTE: yeh channel ab VERIFY_CHANNELS me bhi hai, isliye verified user ko tg2 task turant mil jata hai.
 const TASK_CHANNEL = { id: '@cryptotech16', name: 'Telegram Channel 2' };
 
 // YouTube tasks (Open -> Submit -> Claim)
 const YT_TASKS = ['yt1', 'yt2'];
 
-const WELCOME_TEXT = '🔥 <b>Welcome to USDC ONE!</b>\n\n' +
-    '👆 Tap the coin and earn up to <b>0.5 USDC</b> every day.\n\n' +
-    '🎁 Complete tasks (+0.3 USDC each) and invite friends (+0.3 USDC each).\n\n' +
-    '💸 Withdraw to your Trust Wallet (USDC BEP-20), minimum 2 USDC.\n\n' +
-    '👇 Join our official channels and then open the bot to get started!\n\n' +
-    '🚀 Start earning with USDC ONE today!';
+const WELCOME_TEXT = 'Hello, welcome to <b>USDC ONE</b>! 🚀 Get ready for an exciting earning experience!\n\n' +
+    'Join us, tap the coin, complete daily challenges, and invite your friends to earn USDC rewards! ' +
+    'Build your team and boost your daily earnings!\n\n' +
+    '🔥 <b>Let\'s earn with USDC ONE!</b>';
 
 // ---------- DATABASE (server band nahi hota, DB connect na ho to retry karta hai) ----------
 async function connectDB() {
@@ -707,10 +708,11 @@ app.post('/api/webhook', async (req, res) => {
                     await User.updateOne({ id: chatId, referredBy: null }, { referredBy: referrer });
                 }
 
-                const kb = [[
-                    { text: '📢 Join USDC ONE Official', url: 'https://t.me/updatechanneluta' },
-                    { text: '💳 Payments Channel', url: 'https://t.me/paymentchanneluta' }
-                ]];
+                // Har channel ka button alag row me (poori width), screenshot ki tarah
+                const kb = [
+                    [{ text: '📢 Official Updates Channel', url: CHANNEL_UPDATES.url }],
+                    [{ text: '💸 Official Payouts Channel', url: CHANNEL_PAYOUTS.url }]
+                ];
                 await sendMsg(chatId, WELCOME_TEXT, { inline_keyboard: kb });
             } else if (text === '/admin' && chatId === ADMIN_ID) {
                 await sendMsg(chatId, '👑 <b>USDC ONE Admin</b>',
