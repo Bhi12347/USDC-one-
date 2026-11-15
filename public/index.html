@@ -1290,10 +1290,24 @@ function walletFromProvider(p) {
 async function getWC() {
     if (WC) return WC;
     if (!WC_PROJECT_ID || WC_PROJECT_ID.indexOf('YOUR_') === 0) throw new Error('WalletConnect Project ID missing in file');
-    if (!window['@walletconnect/ethereum-provider']) {
+    const pick = g => g && (g.EthereumProvider || (g.default && g.default.EthereumProvider) || g.default || g);
+    const ok = x => x && typeof x.init === 'function';
+
+    let EP = null;
+    try {
         await loadScript('https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.17.0/dist/index.umd.js');
+        EP = pick(window['@walletconnect/ethereum-provider'])
+          || pick(window.WalletConnectEthereumProvider)
+          || pick(window.EthereumProvider);
+    } catch (e) {}
+
+    // Fallback: agar UMD se na mile to ES module se load karo
+    if (!ok(EP)) {
+        const m = await import('https://esm.sh/@walletconnect/ethereum-provider@2.17.0');
+        EP = m.EthereumProvider || (m.default && m.default.EthereumProvider) || m.default;
     }
-    const EP = window['@walletconnect/ethereum-provider'].EthereumProvider;
+    if (!ok(EP)) throw new Error('WalletConnect failed to load');
+
     const p = await EP.init({
         projectId: WC_PROJECT_ID,
         chains: [56],                         // sirf BNB Smart Chain (BEP-20)
