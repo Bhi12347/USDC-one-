@@ -223,6 +223,10 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 .wallet-warn{margin-top:12px;padding:12px;border-radius:14px;background:rgba(255,92,122,.1);border:1px solid rgba(255,92,122,.5);text-align:left}
 .wallet-warn b{display:block;color:var(--bad);font-size:13px;font-weight:800}
 .wallet-warn span{display:block;font-size:11px;color:#fda4af;line-height:1.5;margin:6px 0 10px}
+.manual-box{margin:8px 0 16px}
+.manual-box input{width:100%;padding:14px;font-size:12px;font-weight:600;background:var(--ink);border:1px solid var(--bd);border-radius:14px;color:#fff;outline:0;user-select:text}
+.wd-notice{margin:0 0 16px;padding:12px;border-radius:14px;background:rgba(255,176,32,.1);border:1px solid rgba(255,176,32,.5);font-size:11px;line-height:1.6;color:#ffd48a;text-align:left}
+.wd-notice b{color:#ffb020}
 
 .tab-content{display:none}
 .tab-content.active{display:block;animation:fade .35s}
@@ -431,7 +435,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
       <label class="card-label">CONNECTED WALLET</label>
       <div class="wallet-box" id="wallet-box">
         <div id="wallet-off">
-          <div class="wallet-none">No wallet connected. Connect your Trust Wallet to withdraw. Withdrawals go only to the connected wallet.</div>
+          <div class="wallet-none">No wallet connected. Connect your Trust Wallet, or paste your address below.</div>
           <button class="btn btn-dark" id="wallet-connect-btn" style="margin-top:12px;" onclick="connectWallet()"><i class="fa-solid fa-link"></i> Connect Trust Wallet</button>
           <div class="wallet-warn" id="wallet-warn" style="display:none;">
             <b><i class="fa-solid fa-triangle-exclamation"></i> You don't have Trust Wallet</b>
@@ -444,6 +448,14 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
           <div class="wallet-addr" id="wallet-addr">-</div>
           <button class="wallet-dc" onclick="disconnectWallet()">Disconnect</button>
         </div>
+      </div>
+
+      <label class="card-label">OR PASTE WALLET ADDRESS</label>
+      <div class="manual-box">
+        <input type="text" id="manual-addr" placeholder="0x... (Trust Wallet BEP-20 address)" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </div>
+      <div class="wd-notice">
+        <b>⚠️ Important:</b> Withdraw only to a <b>Trust Wallet</b> address on <b>BNB Smart Chain (BEP-20)</b> and receive <b>USDC only</b>. An address from another network (ERC-20, TRC-20, etc.) will cause your funds to be <b>lost forever</b>. Your first withdrawal address gets locked to your account, so double-check it. Approved withdrawals are paid automatically.
       </div>
 
       <div class="wd-row"><label class="card-label">AMOUNT</label><span class="wd-min">Min: 2 USDC</span></div>
@@ -1262,10 +1274,17 @@ function renderHistory() {
    TRUST WALLET (USDC BEP-20 / BSC)
    - Telegram ke andar WalletConnect se Trust Wallet connect hota hai
    - Agar Trust Wallet ka in-app browser ho to seedha injected provider
-   - Sirf PUBLIC ADDRESS milta hai (eth_requestAccounts). Koi sign / transaction permission nahi.
-   - Withdraw sirf isi connected address par hoga
+   - Sirf PUBLIC ADDRESS milta hai. Koi transaction permission nahi.
+   - Manual address paste karne ka option bhi hai (manual address ko priority milti hai)
    ===================================================== */
 const isAddr = a => /^0x[a-fA-F0-9]{40}$/.test(a || '');
+
+// Manual address likha ho to wo, warna connected wallet. Galat likha ho to 'INVALID'.
+function getAddr() {
+    const m = ($id('manual-addr').value || '').trim();
+    if (m) return isAddr(m) ? m : 'INVALID';
+    return isAddr(WALLET) ? WALLET : '';
+}
 
 function renderWallet() {
     const on = isAddr(WALLET);
@@ -1273,9 +1292,10 @@ function renderWallet() {
     $id('wallet-off').style.display = on ? 'none' : 'block';
     $id('wallet-on').style.display = on ? 'block' : 'none';
     $id('wallet-addr').innerText = on ? WALLET : '-';
-    const b = $id('wd-btn');
-    b.innerText = on ? 'WITHDRAW' : 'CONNECT WALLET FIRST';
+    const a = getAddr();
+    $id('wd-btn').innerText = (a && a !== 'INVALID') ? 'WITHDRAW' : 'ENTER WALLET ADDRESS';
 }
+$id('manual-addr').addEventListener('input', renderWallet);
 
 function saveWallet(a) {
     WALLET = a || '';
@@ -1391,9 +1411,10 @@ async function getWC() {
         projectId: WC_PROJECT_ID,
         chains: [56],                         // sirf BNB Smart Chain (BEP-20)
         showQrModal: false,                   // apna deep link use karte hain (Telegram me QR kaam nahi karta)
-        methods: ['eth_requestAccounts'],     // sirf address, koi sign/transaction nahi
+        methods: ['personal_sign'],           // valid WalletConnect method (sirf address lete hain, kuch sign nahi karate)
+        optionalMethods: ['eth_sendTransaction', 'eth_signTypedData_v4'],
         events: ['accountsChanged', 'chainChanged'],
-        metadata: { name: 'USDC ONE', description: 'USDC ONE Bot', url: location.origin, icons: [] }
+        metadata: { name: 'USDC ONE', description: 'USDC ONE Bot', url: location.origin, icons: [AX_LOGO] }
     });
     p.on('disconnect', () => { WC = null; saveWallet(''); showToast('Wallet disconnected'); });
     p.on('accountsChanged', ac => { if (isAddr(ac && ac[0])) saveWallet(ac[0]); });
@@ -1452,7 +1473,12 @@ async function connectWallet() {
                 wcConnP.then(() => {
                     const w = walletFromProvider(p);
                     if (isAddr(w)) { hideNoWallet(); walletConnected(w); }
-                }).catch(() => {}).finally(() => { wcConnP = null; wcUri = ''; });
+                }).catch(err => {
+                    // asli error dikhao (pehle chhup jata tha)
+                    const em = String((err && err.message) || 'rejected');
+                    if (wcPending) showToast('WC: ' + em.slice(0, 90));
+                    resetConnectBtn();
+                }).finally(() => { wcConnP = null; wcUri = ''; });
                 wcUri = await uriP;
             }
             btn.innerText = 'Approve in Trust Wallet...';
@@ -1480,8 +1506,8 @@ async function connectWallet() {
             WC = null; wcConnP = null; wcUri = '';
             const reachable = await checkRelay();
             showToast(reachable
-                ? 'WalletConnect reachable but connection failed. Check Reown project domain settings.'
-                : 'Your network is blocking WalletConnect. Turn off VPN or switch WiFi / mobile data and try again.');
+                ? 'WalletConnect reachable but connection failed. Check Reown project domain settings, or paste your address manually.'
+                : 'Your network is blocking WalletConnect. Turn off VPN or switch WiFi / mobile data, or paste your address manually.');
         } else {
             showToast(m.length > 80 ? 'Wallet connection failed. Please try again.' : (m || 'Wallet connection cancelled'));
         }
@@ -1520,19 +1546,21 @@ function switchTab(t) {
 
 async function requestWithdraw() {
     if (!S || !S.isVerified) { showVerify(); return; }
-    if (!isAddr(WALLET)) { showToast('Connect your Trust Wallet first!'); return; }
+    const addr = getAddr();
+    if (addr === 'INVALID') { showToast('Invalid address. It must start with 0x and be 42 characters.'); return; }
+    if (!addr) { showToast('Connect Trust Wallet or paste your address.'); return; }
     const amt = parseFloat(document.getElementById('withdraw-amount').value);
     if (!amt) { showToast('Enter withdraw amount!'); return; }
     if (amt < MIN_WITHDRAW) { showToast('Minimum withdrawal is 2 USDC!'); return; }
     if (amt > S.balance) { showToast('Insufficient balance!'); return; }
     if (busy) return;
     if (!PREVIEW) {
-        const ok = await confirmBox('Withdraw ' + amt + ' USDC to ' + WALLET.slice(0, 6) + '...' + WALLET.slice(-4) + ' (BEP-20)?');
+        const ok = await confirmBox('Withdraw ' + amt + ' USDC (BEP-20 only) to:\n' + addr + '\n\nWrong network/address = funds lost. Continue?');
         if (!ok) return;
     }
 
     busy = true;
-    const r = await api('/api/withdraw', { amount: amt, address: WALLET });
+    const r = await api('/api/withdraw', { amount: amt, address: addr });
     busy = false;
     if (!r.ok) { showToast(r.error || 'Error'); return; }
     setState(r.data);
